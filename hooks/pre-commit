@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# Git-хук LibSentinel: перевіряє оновлені залежності перед комітом.
+# Встановлення в проєкті:
+#   cp /шлях/до/libsentinel/hooks/pre-commit .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
+# Пропустити перевірку одноразово:  git commit --no-verify
+
+REQ_FILES=$(git diff --cached --name-only | grep -E '(^|/)requirements[^/]*\.txt$' || true)
+[ -z "$REQ_FILES" ] && exit 0
+
+if ! command -v libsentinel >/dev/null 2>&1; then
+  echo "LibSentinel не знайдено в PATH — перевірку пропущено" >&2
+  exit 0
+fi
+
+STATUS=0
+for f in $REQ_FILES; do
+  echo "LibSentinel: перевірка $f"
+  DIR=$(mktemp -d)
+  git show ":$f" > "$DIR/new.txt"                          # версія, що потрапить у коміт
+  git show "HEAD:$f" > "$DIR/old.txt" 2>/dev/null || : > "$DIR/old.txt"
+  libsentinel requirements --old "$DIR/old.txt" --file "$DIR/new.txt" --dast "${LIBSENTINEL_DAST:-auto}" -q
+  CODE=$?
+  rm -rf "$DIR"
+  [ $CODE -gt $STATUS ] && STATUS=$CODE
+done
+
+if [ $STATUS -eq 2 ]; then
+  echo "LibSentinel: коміт зупинено — виявлено небезпечне оновлення бібліотеки." >&2
+  echo "Перегляньте звіт вище або виконайте commit з --no-verify, якщо впевнені." >&2
+  exit 1
+fi
+exit 0

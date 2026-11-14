@@ -1,0 +1,36 @@
+# Приклад робочого процесу для ВАШОГО проєкту.
+# Скопіюйте цей файл у свій репозиторій як .github/workflows/libsentinel-check.yml
+# і замініть OWNER/libsentinel на адресу репозиторію із засобом.
+
+name: LibSentinel
+
+on:
+  pull_request:
+    paths:
+      - "requirements*.txt"
+  push:
+    branches: [main]
+    paths:
+      - "requirements*.txt"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write   # для завантаження SARIF у вкладку Security
+  pull-requests: read
+
+jobs:
+  dependency-security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0          # потрібна історія для порівняння з базовою гілкою
+
+      - name: LibSentinel
+        uses: OWNER/libsentinel@v1
+        with:
+          requirements-file: requirements.txt
+          fail-on: block          # warn — блокувати також при попередженнях
+          dast: auto
+          # base-ref: origin/main # необов'язково: для PR — цільова гілка, для push — попередній коміт

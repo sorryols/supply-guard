@@ -1,0 +1,107 @@
+name: "LibSentinel — аналіз безпеки оновлень бібліотек"
+description: "Перевіряє змінені залежності Python у pull request: аналіз авторів, SAST, залежності, DAST у пісочниці"
+author: "Іван Заремба"
+branding:
+  icon: shield
+  color: blue
+
+inputs:
+  requirements-file:
+    description: "Файл залежностей"
+    default: "requirements.txt"
+  base-ref:
+    description: "Базова гілка для порівняння (типово — ціль pull request)"
+    default: ""
+  fail-on:
+    description: "block — зупиняти лише при блокуванні; warn — також при попередженні"
+    default: "block"
+  dast:
+    description: "auto | always | never"
+    default: "auto"
+  config:
+    description: "Шлях до власного конфігураційного файлу YAML"
+    default: ""
+  upload-sarif:
+    description: "Завантажувати SARIF у GitHub Code Scanning (вкладка Security)"
+    default: "true"
+
+outputs:
+  exit-code:
+    description: "0 — допуск, 1 — попередження, 2 — блокування, 3 — помилка"
+    value: ${{ steps.scan.outputs.exit-code }}
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
+
+    - name: Встановлення LibSentinel
+      shell: bash
+      run: |
+        python -m pip install --upgrade pip
+        python -m pip install "${{ github.action_path }}"
+
+    - name: Підготовка пісочниці та баз даних
+      shell: bash
+      run: |
+        libsentinel sandbox-build
+        libsentinel update-data || true
+
+    - name: Аналіз змінених залежностей
+      id: scan
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
+      run: |
+        BASE="${{ inputs.base-ref }}"
+        if [ -z "$BASE" ]; then
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE="origin/${{ github.base_ref }}"
+          elif [ -n "${{ github.event.before }}" ] && [ "${{ github.event.before }}" != "0000000000000000000000000000000000000000" ]; then
+            BASE="${{ github.event.before }}"
+          else
+            BASE="HEAD~1"
+          fi
+        fi
+        echo "Базова версія для порівняння: $BASE"
+        CFG=""
+        if [ -n "${{ inputs.config }}" ]; then CFG="--config ${{ inputs.config }}"; fi
+        set +e
+        libsentinel requirements --git-base "$BASE" --file "${{ inputs.requirements-file }}" \
+          --dast "${{ inputs.dast }}" --fail-on "${{ inputs.fail-on }}" $CFG \
+          --json libsentinel-report.json --sarif libsentinel.sarif --no-color
+        CODE=$?
+        set -e
+        echo "exit-code=$CODE" >> "$GITHUB_OUTPUT"
+        python "${{ github.action_path }}/ci/summary.py" libsentinel-report.json >> "$GITHUB_STEP_SUMMARY" || true
+        exit 0
+
+    - name: Завантаження SARIF у вкладку Security
+      if: ${{ inputs.upload-sarif == 'true' && hashFiles('libsentinel.sarif') != '' }}
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: libsentinel.sarif
+        category: libsentinel
+      continue-on-error: true
+
+    - name: Збереження звіту
+      if: ${{ hashFiles('libsentinel-report.json') != '' }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: libsentinel-report
+        path: |
+          libsentinel-report.json
+          libsentinel.sarif
+
+    - name: Рішення
+      shell: bash
+      run: |
+        CODE="${{ steps.scan.outputs.exit-code }}"
+        case "$CODE" in
+          0) echo "LibSentinel: оновлення допущено" ;;
+          1) echo "::warning::LibSentinel: оновлення допущено з попередженням"; [ "${{ inputs.fail-on }}" = "warn" ] && exit 1 || exit 0 ;;
+          2) echo "::error::LibSentinel: оновлення заблоковано"; exit 2 ;;
+          *) echo "::error::LibSentinel: помилка аналізу"; exit 3 ;;
+        esac

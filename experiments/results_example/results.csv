@@ -1,0 +1,44 @@
+name,old,new,label,kind,decision,pa,critical,dast,time,indicators,source
+requests,2.31.0,2.32.3,0,benign-real,allow,0.0,False,True,5.234,,benign_real.csv
+urllib3,2.2.2,2.2.3,0,benign-real,allow,0.0,False,True,4.743,,benign_real.csv
+idna,3.7,3.8,0,benign-real,allow,0.0,False,False,0.796,,benign_real.csv
+certifi,2024.7.4,2024.8.30,0,benign-real,allow,0.0,False,False,0.573,,benign_real.csv
+six,1.16.0,1.17.0,0,benign-real,warn,0.3,False,True,4.794,A4,benign_real.csv
+click,8.1.7,8.1.8,0,benign-real,warn,0.3,False,True,4.311,A4,benign_real.csv
+packaging,24.1,24.2,0,benign-real,allow,0.0,False,False,0.911,,benign_real.csv
+attrs,24.2.0,24.3.0,0,benign-real,allow,0.0,False,False,1.311,,benign_real.csv
+charset-normalizer,3.3.2,3.4.0,0,benign-real,allow,0.0,False,False,0.838,,benign_real.csv
+python-dateutil,2.8.2,2.9.0,0,benign-real,warn,0.58,False,True,5.846,S2 A4,benign_real.csv
+pyyaml,6.0.1,6.0.2,0,benign-real,allow,0.0,False,True,8.349,,benign_real.csv
+jinja2,3.1.4,3.1.5,0,benign-real,allow,0.0,False,False,1.803,,benign_real.csv
+markupsafe,2.1.5,3.0.2,0,benign-real,allow,0.0,False,True,5.534,,benign_real.csv
+tomli,2.0.1,2.0.2,0,benign-real,warn,0.3,False,True,2.87,A4,benign_real.csv
+pluggy,1.5.0,1.6.0,0,benign-real,warn,0.3,False,True,5.425,A4,benign_real.csv
+iniconfig,2.0.0,2.1.0,0,benign-real,allow,0.0,False,True,3.303,,benign_real.csv
+colorama,0.4.5,0.4.6,0,benign-real,allow,0.0,False,True,3.461,,benign_real.csv
+platformdirs,4.2.2,4.3.6,0,benign-real,allow,0.0,False,True,3.279,,benign_real.csv
+filelock,3.15.4,3.16.1,0,benign-real,allow,0.0,False,True,3.351,,benign_real.csv
+typing-extensions,4.12.1,4.12.2,0,benign-real,allow,0.0,False,False,1.245,,benign_real.csv
+tqdm,4.66.4,4.66.5,0,benign-real,allow,0.0,False,False,0.747,,benign_real.csv
+rich,13.7.1,13.8.0,0,benign-real,allow,0.0,False,False,1.243,,benign_real.csv
+pytz,2024.1,2024.2,0,benign-real,allow,0.0,False,True,10.478,,benign_real.csv
+wheel,0.43.0,0.44.0,0,benign-real,allow,0.0,False,True,3.414,,benign_real.csv
+cachetools,5.4.0,5.5.0,0,benign-real,allow,0.0,False,False,0.59,,benign_real.csv
+flask,3.0.3,3.1.0,0,benign-real,allow,0.0,False,False,1.157,,benign_real.csv
+itsdangerous,2.1.2,2.2.0,0,benign-real,warn,0.3,False,True,2.951,A4,benign_real.csv
+werkzeug,3.0.4,3.0.6,0,benign-real,allow,0.0,False,False,1.351,,benign_real.csv
+pygments,2.18.0,2.19.1,0,benign-real,allow,0.1287,False,False,5.75,S5,benign_real.csv
+sqlparse,0.5.1,0.5.2,0,benign-real,allow,0.0,False,False,0.654,,benign_real.csv
+libsentinel-demo,1.0.0,1.0.1,0,benign-bugfix,allow,0.0,False,True,4.119,,synthetic.csv
+libsentinel-demo,1.0.0,1.0.2,0,benign-network-func,allow,0.0,False,True,4.03,,synthetic.csv
+libsentinel-demo,1.0.0,1.0.3,0,benign-new-dep,allow,0.2,False,True,4.034,D1,synthetic.csv
+libsentinel-demo,1.0.0,1.0.4,0,benign-subprocess-func,warn,0.4,False,True,3.907,S2,synthetic.csv
+libsentinel-demo,1.0.0,1.0.5,0,benign-refactor,allow,0.0,False,True,3.807,,synthetic.csv
+libsentinel-demo,1.0.0,1.1.0,1,exfil-setup,block,1.0,True,False,0.005,K2 S4 S1 S3,synthetic.csv
+libsentinel-demo,1.0.0,1.1.1,1,b64-exec-import,block,1.0,True,False,0.005,K1 S1 S2,synthetic.csv
+libsentinel-demo,1.0.0,1.1.2,1,pth-persistence,block,1.0,True,False,0.005,K3 S1,synthetic.csv
+libsentinel-demo,1.0.0,1.1.3,1,obfuscated-setup,block,1.0,True,True,4.16,K5 S1 S2,synthetic.csv
+libsentinel-demo,1.0.0,1.1.4,1,shell-in-setup,block,0.82,False,True,4.067,B2 S1 S2,synthetic.csv
+libsentinel-demo,1.0.0,1.1.5,1,typosquat-dep,warn,0.6,False,True,4.051,D2 D1,synthetic.csv
+libsentinel-demo,1.0.0,1.1.6,1,import-time-exfil,block,1.0,True,False,0.005,K2 S4 S1 S3,synthetic.csv
+libsentinel-demo,1.0.0,1.1.7,1,persistence-bashrc,block,0.76,False,True,4.07,B3 S1,synthetic.csv
