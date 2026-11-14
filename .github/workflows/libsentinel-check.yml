@@ -1,0 +1,26 @@
+name: LibSentinel
+
+on:
+  pull_request:
+    paths:
+      - "**/requirements*.txt"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write
+  pull-requests: read
+
+jobs:
+  dependency-security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: LibSentinel
+        uses: ./
+        with:
+          requirements-file: demo/requirements.txt
+          fail-on: block
+          dast: auto
