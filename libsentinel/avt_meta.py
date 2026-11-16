@@ -9,6 +9,7 @@ A5 — відсутність тегу версії в репозиторії.
 
 from __future__ import annotations
 
+import re
 import statistics
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
@@ -166,14 +167,44 @@ def find_repo(project: Dict[str, Any]) -> Optional[Tuple[str, str]]:
 def tag_candidates(name: str, version: str) -> List[str]:
     n = name.lower()
     return [version, f"v{version}", f"{n}-{version}", f"{n}-v{version}", f"release-{version}",
-            f"{n.replace('-', '_')}-{version}", f"V{version}"]
+            f"release_{version}", f"{n.replace('-', '_')}-{version}", f"V{version}"]
+
+
+def _tag_version(tag: str):
+    """Версія з назви тегу: v1.2.3, release_2024.2, name-1.2.3, 2024.08.30 → Version."""
+    from packaging.version import InvalidVersion, Version
+    m = re.search(r"(\d+(?:[._]\d+)*(?:[._-]?(?:a|b|rc|post|dev)\d*)?)$", tag)
+    if not m:
+        return None
+    try:
+        return Version(m.group(1).replace("_", "."))
+    except InvalidVersion:
+        return None
 
 
 def find_tag(gh: GitHub, owner: str, repo: str, name: str, version: str) -> Optional[str]:
-    for cand in tag_candidates(name, version):
+    """Пошук тегу версії: спершу типові назви, потім порівняння нормалізованих версій усіх тегів."""
+    from packaging.version import InvalidVersion, Version
+    for cand in tag_candidates(name, version)[:2]:
         d = gh.get(f"/repos/{owner}/{repo}/git/ref/tags/{cand}")
         if isinstance(d, dict) and not d.get("__404__"):
             return cand
+    try:
+        target = Version(version)
+    except InvalidVersion:
+        target = None
+    for page in range(1, 6):
+        tags = gh.get(f"/repos/{owner}/{repo}/tags?per_page=100&page={page}")
+        if not isinstance(tags, list) or not tags:
+            break
+        for tg in tags:
+            tname = tg.get("name", "")
+            if tname in tag_candidates(name, version):
+                return tname
+            if target is not None and _tag_version(tname) == target:
+                return tname
+        if len(tags) < 100:
+            break
     return None
 
 

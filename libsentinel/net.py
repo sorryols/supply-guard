@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import re
+import time
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import quote
 
@@ -31,10 +32,7 @@ class Http:
             hit = self.cache.get_http(url, self.ttl)
             if hit is not None:
                 return hit
-        try:
-            r = self.s.get(url, headers=headers or {}, timeout=self.timeout)
-        except requests.RequestException as e:
-            raise NetError(f"{url}: {e}") from e
+        r = self._request("get", url, headers=headers or {})
         if r.status_code == 404 and allow_404:
             if use_cache:
                 self.cache.put_http(url, {"__404__": True})
@@ -46,11 +44,23 @@ class Http:
             self.cache.put_http(url, data)
         return data
 
+    def _request(self, method: str, url: str, **kw) -> requests.Response:
+        """Запит із повторними спробами при тимчасових збоях (з'єднання, HTTP 429/5xx)."""
+        last: Optional[Exception] = None
+        for attempt in range(4):
+            try:
+                r = self.s.request(method, url, timeout=self.timeout, **kw)
+                if r.status_code in (429, 500, 502, 503, 504) and attempt < 3:
+                    time.sleep(2 ** attempt)
+                    continue
+                return r
+            except requests.RequestException as e:
+                last = e
+                time.sleep(2 ** attempt)
+        raise NetError(f"{url}: {last}")
+
     def post_json(self, url: str, payload: dict) -> Any:
-        try:
-            r = self.s.post(url, json=payload, timeout=self.timeout)
-        except requests.RequestException as e:
-            raise NetError(f"{url}: {e}") from e
+        r = self._request("post", url, json=payload)
         if r.status_code != 200:
             raise NetError(f"{url}: HTTP {r.status_code}")
         return r.json()
