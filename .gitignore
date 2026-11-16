@@ -7,3 +7,4 @@ experiments/synthetic/
 experiments/results/
 build/
 dist/
+test_results.txt
