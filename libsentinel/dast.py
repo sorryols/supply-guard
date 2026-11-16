@@ -31,6 +31,14 @@ RE_INET6 = re.compile(r'sin6_port=htons\((\d+)\).*?inet_pton\(AF_INET6,\s*"([^"]
 
 SHELLS = {"sh", "bash", "dash", "zsh", "ksh", "busybox"}
 
+# Внутрішні програми компілятора C/C++, які запускаються під час збирання розширень
+TOOLCHAIN = re.compile(r"^((x86_64|aarch64)-linux-gnu-)?(gcc|g\+\+|cc|c\+\+|cpp|ld|ld\.bfd|ld\.gold|as|ar|"
+                       r"strip|cc1|cc1plus|collect2|lto-wrapper|lto1)(-\d+)?$")
+
+
+def is_toolchain(path: str, name: str) -> bool:
+    return bool(TOOLCHAIN.match(name)) or path.startswith(("/usr/lib/gcc/", "/usr/libexec/gcc/"))
+
 
 @dataclass
 class TraceEvent:
@@ -96,8 +104,9 @@ def analyze_events(events: List[TraceEvent], info: Dict[str, Any], cfg: Dict[str
         if e.call == "execve":
             path = e.first_str() or ""
             name = path.rsplit("/", 1)[-1]
-            base = re.sub(r"[\d.]+$", "", name)  # python3.12 -> python
-            if not name or path.startswith(venv) or name in allowed_prog or base in allowed_prog:
+            base = re.sub(r"[-\d.]+$", "", name)  # python3.12 -> python, gcc-12 -> gcc
+            if not name or path.startswith(venv) or name in allowed_prog or base in allowed_prog \
+                    or is_toolchain(path, name):
                 continue
             argv = RE_STR.findall(e.args.split("]", 1)[0]) if "[" in e.args else []
             key = ("exec", name)

@@ -28,7 +28,8 @@ class Analyzer:
                 old_archives: Optional[List[Path]] = None, new_archives: Optional[List[Path]] = None,
                 force: bool = False) -> Dict[str, Any]:
         local = bool(new_archives)
-        key = f"{name.lower()}|{old_version}|{new_version}|{dast_mode}|{offline}|{config_hash(self.cfg)}"
+        from . import __version__
+        key = f"{__version__}|{name.lower()}|{old_version}|{new_version}|{dast_mode}|{offline}|{config_hash(self.cfg)}"
         if not force and not local:
             hit = self.cache.get_result(key)
             if hit:

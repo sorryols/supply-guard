@@ -87,11 +87,12 @@ def main() -> int:
         rec = {"name": r["name"], "old": r.get("old"), "new": r["new"], "label": int(r["label"]),
                "kind": r.get("kind", ""), "decision": res["decision"], "pa": res.get("anomaly_probability"),
                "critical": crit, "dast": res.get("dynamic_analysis"), "time": round(dt, 3),
-               "indicators": " ".join(trig), "source": r["_source"]}
+               "indicators": " ".join(trig), "source": r["_source"], "error": res.get("error", "")}
         records.append(rec)
         pa = "—" if rec["pa"] is None else f"{rec['pa']:.2f}"
         print(f"{n:>3} {r['name'][:21]:<22}{(str(r.get('old') or '—') + '→' + r['new'])[:21]:<22}{rec['label']:>6}"
-              f"{pa:>7}  {rec['decision']:<8}{'так' if rec['dast'] else 'ні':>5}{dt:>7.2f}  {rec['indicators']}")
+              f"{pa:>7}  {rec['decision']:<8}{'так' if rec['dast'] else 'ні':>5}{dt:>7.2f}  {rec['indicators']}"
+              + (f"  ПОМИЛКА: {rec['error'][:80]}" if rec["error"] else ""))
 
     valid = [r for r in records if r["decision"] != "error"]
     pos = {"block": {"block"}, "warn": {"block", "warn"}}[a.positive]

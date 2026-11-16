@@ -73,6 +73,35 @@ NON_INSTALLED = re.compile(r"^(src/)?(examples?|tests?|testing|docs?|benchmarks?
 IMPORT_ENTRY = re.compile(r"^(src/)?([^/]+/__init__\.py|[^/]+\.py)$")
 
 
+def is_generated_metadata(text: str) -> bool:
+    """Файл, згенерований системою збирання (setuptools-scm, hatch-vcs): лише присвоєння констант.
+
+    Такі файли (_version.py, _dist_ver.py тощо) закономірно відсутні в репозиторії.
+    """
+    if len(text) > 2000:
+        return False
+    try:
+        tree = ast.parse(text)
+    except (SyntaxError, ValueError):
+        return False
+    for node in tree.body:
+        if isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant):
+            continue                                       # docstring
+        if isinstance(node, ast.ImportFrom) and node.module in ("__future__", "typing"):
+            continue
+        if isinstance(node, ast.Import) and all(a.name == "typing" for a in node.names):
+            continue
+        if isinstance(node, (ast.Assign, ast.AnnAssign)):
+            value = node.value
+            if value is None or all(isinstance(n, (ast.Constant, ast.Tuple, ast.List, ast.Name, ast.Load,
+                                                   ast.UnaryOp, ast.USub)) for n in ast.walk(value)):
+                continue
+        if isinstance(node, ast.If):                       # if TYPE_CHECKING: ...
+            continue
+        return False
+    return True
+
+
 def is_non_installed(form: str, rel: str) -> bool:
     return form == "sdist" and NON_INSTALLED.match(rel) is not None
 
@@ -354,8 +383,8 @@ def run(ctx: Context, cfg: Dict, present_in_repo: Optional[Callable[[str], bool]
         old_text = _read(old_files[key]) if key in old_files else ""
         nlines = _changed_lines(old_text, text)
 
-        # S6 — файл коду відсутній у репозиторії
-        if present_in_repo is not None and not present_in_repo(rel if form == "sdist" else rel):
+        # S6 — файл коду відсутній у репозиторії (крім згенерованих файлів з номером версії)
+        if present_in_repo is not None and not present_in_repo(rel) and not is_generated_metadata(text):
             S6.value = 1.0
             S6.add("Файл є в пакеті, але відсутній у репозиторії на теґу версії", file=key)
             ctx.unmatched_lines += nlines

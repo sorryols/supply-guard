@@ -319,7 +319,7 @@ chmod +x .git/hooks/pre-commit
 
 ```bash
 source .venv/bin/activate
-pytest -v                      # усі тести (72); тести з Docker пропускаються, якщо пісочниці немає
+pytest -v                      # усі тести (77); тести з Docker пропускаються, якщо пісочниці немає
 pytest -v -k "not dynamic"     # лише тести без Docker
 ```
 
