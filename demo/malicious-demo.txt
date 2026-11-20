@@ -1,0 +1,2 @@
+libsentinel-demo==1.1.1  # SAST: виконання base64-коду під час імпорту (К1)
+libsentinel-demo==1.1.3  # DAST: обфускований setup.py читає файл-приманку (К5)
