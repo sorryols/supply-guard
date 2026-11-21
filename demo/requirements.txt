@@ -1,3 +1,6 @@
 requests==2.32.3
 flask==3.1.0
 idna==3.8
+werkzeug==3.1.9
+six==1.17.0
+123bla==0.0.1
