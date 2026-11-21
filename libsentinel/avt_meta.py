@@ -16,7 +16,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from .cache import Cache
-from .models import Author, Context
+from .models import Author, Context, NO_WEIGHTS
 from .net import GitHub, Http, NetError, PyPI
 
 MAINTAINER_ASSOC = {"OWNER", "MEMBER", "COLLABORATOR"}
@@ -334,7 +334,7 @@ def collect_authors(ctx: Context, gh: GitHub, cfg: Dict[str, Any]) -> None:
 
 
 def finalize_trust(ctx: Context, cfg: Dict[str, Any], w: float) -> Optional[float]:
-    """Формула (2.3): τ = Σ c_j·t_j / Σ c_j; індикатор A3 = 1 − τ."""
+    """Формула (2.3): Da = Σ n_j·r_j / Σ n_j; індикатор A3 спрацьовує, якщо Da < δ (поріг низької довіри)."""
     ind = ctx.ind("A3", w)
     tcfg = cfg["trust"]
     if ctx.unmatched_lines > 0:
@@ -360,9 +360,11 @@ def finalize_trust(ctx: Context, cfg: Dict[str, Any], w: float) -> Optional[floa
             return 1.0
     total = sum(a.changed_lines for a in ctx.authors)
     tau = sum(a.changed_lines * a.trust for a in ctx.authors) / total if total else 1.0
-    ind.value = round(1 - tau, 4)
+    low = float(tcfg.get("low_threshold", 0.5))
+    ind.value = 1.0 if tau < low else 0.0
+    ind.note = f"Da = {tau:.2f}, поріг низької довіри δ = {low}"
     for a in sorted(ctx.authors, key=lambda x: -x.changed_lines):
-        ind.add(f"{a.login or a.name}: роль «{a.role}», t={a.trust}, змінено {a.changed_lines}, комітів {a.commits}")
+        ind.add(f"{a.login or a.name}: роль «{a.role}», r={a.trust}, змінено рядків {a.changed_lines}, комітів {a.commits}")
         if a.role == "newcomer":
             files = f" (файли: {', '.join(a.files)})" if a.files else ""
             ctx.warnings.append(f"Новий учасник {a.login} вніс зміни до версії {ctx.new.version}{files}")
@@ -370,7 +372,7 @@ def finalize_trust(ctx: Context, cfg: Dict[str, Any], w: float) -> Optional[floa
 
 
 def repo_file_matcher(ctx: Context):
-    """Функція, що перевіряє наявність файлу пакета в репозиторії (для S6)."""
+    """Функція, що перевіряє наявність файлу бібліотеки в репозиторії (для S6)."""
     files = ctx.repo.get("files")
     if not files:
         return None
@@ -395,7 +397,7 @@ def repo_file_matcher(ctx: Context):
 def run(ctx: Context, http: Http, cache: Cache, cfg: Dict[str, Any],
         project: Optional[Dict[str, Any]], old_rel: Dict[str, Any], new_rel: Dict[str, Any],
         offline: bool = False) -> None:
-    w = cfg["weights"]
+    w = NO_WEIGHTS  # у методі індикатори не мають ваг
     if offline or not project:
         for code in ("A1", "A2", "A4", "A5"):
             i = ctx.ind(code, w[code])

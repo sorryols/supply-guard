@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import defaultdict
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -19,7 +20,7 @@ INDICATOR_NAMES: Dict[str, str] = {
     "S3": "Нові мережеві можливості",
     "S4": "Доступ до чутливих даних",
     "S5": "Рядки з високою ентропією",
-    "S6": "Файли пакета, відсутні в репозиторії",
+    "S6": "Файли бібліотеки, відсутні в репозиторії",
     "D1": "Нова пряма залежність",
     "D2": "Схожість назви залежності на популярну",
     "D3": "Нова або малоактивна залежність",
@@ -30,7 +31,7 @@ INDICATOR_NAMES: Dict[str, str] = {
     "K1": "Виконання розкодованого коду",
     "K2": "Облікові дані та мережевий виклик в одному модулі",
     "K3": "Новий файл .pth з інструкцією import",
-    "K4": "Бібліотека або залежність у базі шкідливих пакетів",
+    "K4": "Бібліотека або залежність у базі шкідливих бібліотек",
     "K5": "Читання файлів-приманок",
 }
 
@@ -56,9 +57,17 @@ class Evidence:
         return {k: v for k, v in asdict(self).items() if v is not None}
 
 
+NO_WEIGHTS: Dict[str, float] = defaultdict(float)
+
+
 @dataclass
 class Indicator:
-    """Індикатор безпеки: значення x_k, вага p_k і докази."""
+    """Індикатор безпеки: ознака x_k ∈ {0, 1} (спрацював чи ні) і докази.
+
+    Індикатори не дають числової оцінки: вони лише фіксують, що ознака спрацювала.
+    Поле value зберігається для внутрішніх потреб (наприклад, інтенсивність ентропії),
+    але рішення приймається лише за фактом спрацювання.
+    """
 
     code: str
     value: float = 0.0
@@ -79,13 +88,6 @@ class Indicator:
     def triggered(self) -> bool:
         return self.evaluated and self.value > 0
 
-    @property
-    def contribution(self) -> float:
-        """Внесок індикатора p_k * x_k."""
-        if self.critical:
-            return 1.0 if self.triggered else 0.0
-        return round(self.weight * self.value, 4)
-
     def add(self, message: str, file: Optional[str] = None, line: Optional[int] = None,
             snippet: Optional[str] = None) -> None:
         self.evidence.append(Evidence(message, file, line, snippet))
@@ -95,9 +97,8 @@ class Indicator:
             "code": self.code,
             "name": self.name,
             "value": round(self.value, 4),
-            "weight": self.weight,
+            "triggered": self.triggered,
             "critical": self.critical,
-            "contribution": self.contribution,
             "evaluated": self.evaluated,
             "note": self.note,
             "evidence": [e.to_dict() for e in self.evidence],
@@ -136,7 +137,7 @@ class Vulnerability:
 
 @dataclass
 class PackageVersion:
-    """Розпакована версія пакета."""
+    """Розпакована версія бібліотеки."""
 
     name: str
     version: Optional[str]
@@ -177,16 +178,15 @@ class Context:
 
 @dataclass
 class Report:
-    """Звіт Z = <d, Pa, τ, L, F, V> (формула 2.2)."""
+    """Звіт Z = (d, Da, L, F, V) (формула 2.2)."""
 
     package: str
     old_version: Optional[str]
     new_version: str
     decision: str          # allow | warn | block
     exit_code: int
-    probability: float     # Pa
-    trust_update: float    # D = 1 - Pa
-    author_trust: Optional[float]   # τ
+    triggered_count: int   # кількість звичайних індикаторів, що спрацювали
+    author_trust: Optional[float]   # Da — ступінь довіри до авторів змін
     level: str             # низький | середній | високий | критичний
     indicators: List[Indicator]
     vulnerabilities: List[Vulnerability]
@@ -203,8 +203,7 @@ class Report:
             "new_version": self.new_version,
             "decision": self.decision,
             "exit_code": self.exit_code,
-            "anomaly_probability": round(self.probability, 4),
-            "update_trust": round(self.trust_update, 4),
+            "triggered_count": self.triggered_count,
             "author_trust": None if self.author_trust is None else round(self.author_trust, 4),
             "danger_level": self.level,
             "dynamic_analysis": self.dynamic_run,

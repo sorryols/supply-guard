@@ -86,7 +86,7 @@ class PyPI:
     def project(self, name: str) -> Dict[str, Any]:
         d = self.http.get_json(f"{self.BASE}/pypi/{quote(name)}/json", allow_404=True)
         if d.get("__404__"):
-            raise NetError(f"Пакет {name} не знайдено в PyPI")
+            raise NetError(f"Бібліотеку {name} не знайдено в PyPI")
         return d
 
     def release(self, name: str, version: str) -> Dict[str, Any]:

@@ -5,10 +5,10 @@ S2 — нові небезпечні виклики (eval, exec, compile, subpro
 S3 — нові мережеві можливості в коді встановлення або імпорту;
 S4 — доступ до чутливих даних (токени, ключі, облікові дані);
 S5 — рядки з високою ентропією;
-S6 — файли пакета, відсутні в репозиторії;
+S6 — файли бібліотеки, відсутні в репозиторії;
 К1 — виконання розкодованого коду; К2 — облікові дані та мережевий виклик в одному модулі;
 К3 — новий файл .pth з інструкцією import.
-Код пакета НЕ виконується — лише розбирається модулем ast.
+Код бібліотеки НЕ виконується — лише розбирається модулем ast.
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Dict, Iterable, List, Optional, Set, Tuple
 
-from .models import Context
+from .models import Context, NO_WEIGHTS
 
 # --- категорії можливостей коду -----------------------------------------
 NETWORK_CALLS = {
@@ -69,7 +69,7 @@ def is_install_file(form: str, rel: str) -> bool:
 # Каталоги sdist, що не встановлюються і не імпортуються (приклади, тести, документація)
 NON_INSTALLED = re.compile(r"^(src/)?(examples?|tests?|testing|docs?|benchmarks?|bench|\.github|ci|tools|"
                            r"demos?|samples?|notebooks?)/")
-# Код, що виконується під час `import пакет`: __init__.py пакета верхнього рівня або модуль верхнього рівня
+# Код, що виконується під час `import бібліотека`: __init__.py бібліотеки верхнього рівня або модуль верхнього рівня
 IMPORT_ENTRY = re.compile(r"^(src/)?([^/]+/__init__\.py|[^/]+\.py)$")
 
 
@@ -282,7 +282,7 @@ def shannon_entropy(s: str) -> float:
     return -sum(c / n * math.log2(c / n) for c in Counter(s).values())
 
 
-# --- робота з файлами пакета ---------------------------------------------
+# --- робота з файлами бібліотеки ---------------------------------------------
 def list_files(root: Optional[Path]) -> Dict[str, Path]:
     """Ключ — «форма/відносний шлях», наприклад sdist/pkg/__init__.py."""
     out: Dict[str, Path] = {}
@@ -339,7 +339,7 @@ def _build_system(text: str) -> str:
 
 
 def run(ctx: Context, cfg: Dict, present_in_repo: Optional[Callable[[str], bool]] = None) -> None:
-    w = cfg["weights"]
+    w = NO_WEIGHTS  # у методі індикатори не мають ваг
     scfg = cfg["sast"]
     for code in ("S1", "S2", "S3", "S4", "S5", "S6"):
         ctx.ind(code, w[code])
@@ -386,7 +386,7 @@ def run(ctx: Context, cfg: Dict, present_in_repo: Optional[Callable[[str], bool]
         # S6 — файл коду відсутній у репозиторії (крім згенерованих файлів з номером версії)
         if present_in_repo is not None and not present_in_repo(rel) and not is_generated_metadata(text):
             S6.value = 1.0
-            S6.add("Файл є в пакеті, але відсутній у репозиторії на теґу версії", file=key)
+            S6.add("Файл є в бібліотеці, але відсутній у репозиторії на теґу версії", file=key)
             ctx.unmatched_lines += nlines
 
         # К3 — новий .pth з import
@@ -417,7 +417,7 @@ def run(ctx: Context, cfg: Dict, present_in_repo: Optional[Callable[[str], bool]
             facts.hits = []
             facts.strings = []
         elif ctx.is_new_dependency and not is_install_file(form, rel):
-            # для нової залежності враховується лише код, що виконується під час `import пакет`
+            # для нової залежності враховується лише код, що виконується під час `import бібліотека`
             facts.hits = [h for h in facts.hits if h.import_time] if is_import_entry(rel) else []
         if facts.parse_error:
             ctx.notes.append(f"Файл {key} не вдалося розібрати як код Python ({facts.parse_error}); "
@@ -433,7 +433,7 @@ def run(ctx: Context, cfg: Dict, present_in_repo: Optional[Callable[[str], bool]
                 S1.value = 1.0
                 msg = "Змінено код, що виконується під час встановлення" if not ctx.is_new_dependency \
                     else "Код встановлення нової залежності містить небезпечні можливості"
-                S1.add(f"{msg} ({nlines} змінених рядків)", key)
+                S1.add(f"{msg} (змінено рядків: {nlines})", key)
 
         # S2 — нові небезпечні виклики
         for kind in ("process", "dynexec"):

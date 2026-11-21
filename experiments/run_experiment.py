@@ -1,16 +1,16 @@
 """Експериментальний стенд LibSentinel.
 
 Проганяє засіб на вибірці оновлень з відомою міткою (0 — безпечне, 1 — шкідливе)
-і обчислює показники якості бінарної класифікації (підрозділ 1.4 роботи):
-точність (precision), повноту (recall), F1, частку хибних спрацювань (FPR)
-та середній час аналізу одного оновлення.
-
-Опція --sweep підбирає поріг блокування θ2 за максимумом F1 (калібрування з розділу 2).
+і обчислює показники якості для двох рівнів рішення засобу:
+  • блокування (критичний індикатор) — точність, повнота, F1, частка хибних блокувань;
+  • виявлення (блокування або передача на розгляд розробнику) — частка шкідливих
+    оновлень, які не пройшли непоміченими, і частка безпечних, переданих на розгляд.
+Також рахує, як часто спрацьовував кожен індикатор на шкідливих і безпечних зразках.
 
 Приклади:
   python experiments/make_synthetic.py
   python experiments/run_experiment.py experiments/benign_real.csv experiments/synthetic/synthetic.csv
-  python experiments/run_experiment.py data.csv --dast never --sweep
+  python experiments/run_experiment.py data.csv --dast never
 """
 
 from __future__ import annotations
@@ -58,79 +58,99 @@ def main() -> int:
     ap.add_argument("datasets", nargs="+", help="CSV: name,old,new,label[,old_archive,new_archive,kind]")
     ap.add_argument("--config")
     ap.add_argument("--dast", choices=["auto", "always", "never"], default="auto")
-    ap.add_argument("--positive", choices=["block", "warn"], default="block",
-                    help="Яке рішення вважати позитивним (виявленим шкідливим оновленням)")
-    ap.add_argument("--sweep", action="store_true", help="Підбір порогу θ2 за максимумом F1")
+    ap.add_argument("--limit", type=int, default=0, help="Обмежити кількість зразків з кожного CSV")
     ap.add_argument("--out", default="experiments/results")
     a = ap.parse_args()
 
     cfg = load_config(a.config)
     an = Analyzer(cfg, use_cache=True)
     rows = load_rows(a.datasets)
+    if a.limit:
+        by_src: Dict[str, int] = {}
+        kept = []
+        for r in rows:
+            by_src[r["_source"]] = by_src.get(r["_source"], 0) + 1
+            if by_src[r["_source"]] <= a.limit:
+                kept.append(r)
+        rows = kept
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
     records = []
     print(f"Зразків: {len(rows)}; динамічний аналіз: {a.dast}\n")
-    print(f"{'#':>3} {'Бібліотека':<22}{'Версії':<22}{'Мітка':>6}{'Pa':>7}  {'Рішення':<8}{'DAST':>5}{'Час,с':>7}  Індикатори")
+    print(f"{'#':>3} {'Бібліотека':<22}{'Версії':<22}{'Мітка':>6}{'Ознак':>7}  {'Рішення':<8}{'DAST':>5}{'Час,с':>7}  Індикатори")
     for n, r in enumerate(rows, 1):
-        old_a = [Path(r["old_archive"])] if r.get("old_archive") else None
-        new_a = [Path(r["new_archive"])] if r.get("new_archive") else None
+        old_a = [Path(x) for x in r["old_archive"].split(";")] if r.get("old_archive") else None
+        new_a = [Path(x) for x in r["new_archive"].split(";")] if r.get("new_archive") else None
+        # локальні архіви нової версії; стара версія (якщо задана без архіву) завантажується з PyPI
+        offline = bool(new_a) and (not r.get("old") or bool(old_a))
         t0 = time.perf_counter()
         try:
             res = an.analyze(r["name"], r.get("old") or None, r["new"], dast_mode=a.dast,
-                             offline=bool(new_a), old_archives=old_a, new_archives=new_a, force=True)
+                             offline=offline, old_archives=old_a, new_archives=new_a, force=True)
         except Exception as e:  # noqa: BLE001
             res = error_result(r["name"], r.get("old"), r["new"], str(e))
         dt = time.perf_counter() - t0
         trig = [i["code"] for i in res["indicators"] if i["evaluated"] and i["value"] > 0]
         crit = any(i["critical"] and i["value"] > 0 for i in res["indicators"])
         rec = {"name": r["name"], "old": r.get("old"), "new": r["new"], "label": int(r["label"]),
-               "kind": r.get("kind", ""), "decision": res["decision"], "pa": res.get("anomaly_probability"),
+               "kind": r.get("kind", ""), "decision": res["decision"], "n": res.get("triggered_count"),
                "critical": crit, "dast": res.get("dynamic_analysis"), "time": round(dt, 3),
                "indicators": " ".join(trig), "source": r["_source"], "error": res.get("error", "")}
         records.append(rec)
-        pa = "—" if rec["pa"] is None else f"{rec['pa']:.2f}"
+        pa = "—" if rec["n"] is None else ("К" if crit else str(rec["n"]))
         print(f"{n:>3} {r['name'][:21]:<22}{(str(r.get('old') or '—') + '→' + r['new'])[:21]:<22}{rec['label']:>6}"
               f"{pa:>7}  {rec['decision']:<8}{'так' if rec['dast'] else 'ні':>5}{dt:>7.2f}  {rec['indicators']}"
               + (f"  ПОМИЛКА: {rec['error'][:80]}" if rec["error"] else ""))
 
     valid = [r for r in records if r["decision"] != "error"]
-    pos = {"block": {"block"}, "warn": {"block", "warn"}}[a.positive]
     y = [r["label"] for r in valid]
-    yp = [1 if r["decision"] in pos else 0 for r in valid]
-    m = metrics(y, yp)
+    m = {"block": metrics(y, [1 if r["decision"] == "block" else 0 for r in valid]),
+         "detect": metrics(y, [1 if r["decision"] in ("block", "warn") else 0 for r in valid])}
     times = [r["time"] for r in valid]
-    m.update({"samples": len(valid), "errors": len(records) - len(valid),
+    mal = [r for r in valid if r["label"] == 1]
+    ben = [r for r in valid if r["label"] == 0]
+    m.update({"samples": len(valid), "malicious": len(mal), "benign": len(ben),
+              "errors": len(records) - len(valid),
+              "decisions_malicious": {d: sum(1 for r in mal if r["decision"] == d) for d in ("block", "warn", "allow")},
+              "decisions_benign": {d: sum(1 for r in ben if r["decision"] == d) for d in ("block", "warn", "allow")},
               "avg_time_s": round(statistics.mean(times), 3) if times else None,
               "median_time_s": round(statistics.median(times), 3) if times else None,
               "dast_share": round(sum(1 for r in valid if r["dast"]) / len(valid), 4) if valid else None,
-              "positive_decision": a.positive, "dast_mode": a.dast})
+              "dast_mode": a.dast})
+    freq: Dict[str, Dict[str, int]] = {}
+    for r in valid:
+        for code in r["indicators"].split():
+            freq.setdefault(code, {"malicious": 0, "benign": 0})
+            freq[code]["malicious" if r["label"] == 1 else "benign"] += 1
+    m["indicator_frequency"] = dict(sorted(freq.items()))
+    by_kind: Dict[str, Dict[str, int]] = {}
+    for r in valid:
+        k = by_kind.setdefault(r["kind"] or r["source"], {"total": 0, "block": 0, "warn": 0, "allow": 0, "dast": 0})
+        k["total"] += 1
+        k[r["decision"]] += 1
+        k["dast"] += 1 if r["dast"] else 0
+    m["by_kind"] = by_kind
 
-    print("\nПоказники ефективності")
-    print(f"  TP={m['TP']} FP={m['FP']} FN={m['FN']} TN={m['TN']} (помилок аналізу: {m['errors']})")
-    print(f"  Точність (precision): {m['precision']:.3f}")
-    print(f"  Повнота (recall):     {m['recall']:.3f}")
-    print(f"  F1:                   {m['F1']:.3f}")
-    print(f"  Частка хибних спрацювань (FPR): {m['FPR']:.3f}")
-    print(f"  Середній час аналізу: {m['avg_time_s']} с (медіана {m['median_time_s']} с)")
-    print(f"  Частка оновлень з динамічним аналізом: {m['dast_share']}")
-
-    if a.sweep and valid:
-        print("\nПідбір порогу блокування θ2 (рішення: критичний індикатор або Pa ≥ θ2)")
-        best = None
-        sweep = []
-        for k in range(10, 100, 5):
-            th = k / 100
-            yp2 = [1 if r["critical"] or (r["pa"] or 0) >= th else 0 for r in valid]
-            mm = metrics(y, yp2)
-            sweep.append({"theta2": th, **mm})
-            print(f"  θ2={th:.2f}  precision={mm['precision']:.3f} recall={mm['recall']:.3f} "
-                  f"F1={mm['F1']:.3f} FPR={mm['FPR']:.3f}")
-            if best is None or (mm["F1"], -mm["FPR"]) > (best["F1"], -best["FPR"]):
-                best = {"theta2": th, **mm}
-        print(f"  Найкращий поріг: θ2 = {best['theta2']:.2f} (F1 = {best['F1']:.3f}, FPR = {best['FPR']:.3f})")
-        m["sweep"] = sweep
-        m["best_theta2"] = best
+    b, d = m["block"], m["detect"]
+    print("\nРішення засобу")
+    print(f"  шкідливі ({len(mal)}): заблоковано {m['decisions_malicious']['block']}, "
+          f"на розгляд {m['decisions_malicious']['warn']}, допущено {m['decisions_malicious']['allow']}")
+    print(f"  безпечні ({len(ben)}): заблоковано {m['decisions_benign']['block']}, "
+          f"на розгляд {m['decisions_benign']['warn']}, допущено {m['decisions_benign']['allow']}")
+    print(f"  помилок аналізу: {m['errors']}")
+    print("\nБлокування (критичні індикатори)")
+    print(f"  TP={b['TP']} FP={b['FP']} FN={b['FN']} TN={b['TN']}")
+    print(f"  Точність {b['precision']:.3f}, повнота {b['recall']:.3f}, F1 {b['F1']:.3f}, частка хибних блокувань {b['FPR']:.3f}")
+    print("Виявлення (блокування або передача на розгляд)")
+    print(f"  Повнота виявлення {d['recall']:.3f}, частка безпечних на розгляді {d['FPR']:.3f}")
+    print(f"\nСередній час аналізу: {m['avg_time_s']} с (медіана {m['median_time_s']} с)")
+    print(f"Частка оновлень з динамічним аналізом: {m['dast_share']}")
+    print("\nЗа сценаріями (усього / заблоковано / на розгляд / допущено / з DAST)")
+    for k, v in by_kind.items():
+        print(f"  {k:<22} {v['total']:>4} {v['block']:>5} {v['warn']:>5} {v['allow']:>5} {v['dast']:>5}")
+    print("\nЧастота спрацювання індикаторів (шкідливі / безпечні)")
+    for code, v in m["indicator_frequency"].items():
+        print(f"  {code:<3} {v['malicious']:>5} / {v['benign']}")
 
     with open(out / "results.csv", "w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=list(records[0].keys()))

@@ -1,8 +1,11 @@
-"""Обчислення ймовірності аномалії та прийняття рішення (підрозділ 2.1).
+"""Правило прийняття рішення (підрозділ 2.1).
 
-Формула (2.4), модель «шумного АБО»:  Pa = 1 − Π (1 − p_k · x_k)
-Правило рішення: блокування при спрацюванні критичного індикатора або Pa ≥ θ2;
-попередження при θ1 ≤ Pa < θ2 або наявності нового учасника серед авторів змін.
+Індикатори не мають ваг і не дають числової оцінки: кожен лише фіксує, що ознака спрацювала.
+  • спрацював критичний індикатор К1–К5            → заблокувати (код 2);
+  • спрацював хоча б один звичайний індикатор      → передати розробнику на розгляд (код 1);
+  • серед авторів змін є новий учасник              → передати розробнику на розгляд (код 1);
+  • жоден індикатор не спрацював                     → допустити (код 0).
+Динамічний аналіз запускається, якщо спрацювало щонайменше m звичайних індикаторів (m = 2).
 """
 
 from __future__ import annotations
@@ -12,45 +15,37 @@ from typing import Dict, Iterable, List, Tuple
 from .models import EXIT_ALLOW, EXIT_BLOCK, EXIT_WARN, Indicator
 
 
-def anomaly_probability(indicators: Iterable[Indicator]) -> float:
-    prod = 1.0
-    for ind in indicators:
-        if ind.critical or not ind.evaluated:
-            continue
-        prod *= 1.0 - max(0.0, min(1.0, ind.weight * ind.value))
-    return 1.0 - prod
-
-
 def critical_triggered(indicators: Iterable[Indicator]) -> List[Indicator]:
     return [i for i in indicators if i.critical and i.triggered]
 
 
-def need_dynamic(indicators: Dict[str, Indicator], pa: float, cfg: Dict) -> Tuple[bool, str]:
-    """Умова запуску динамічного аналізу: Pa ≥ θd або S1 = 1."""
-    theta_d = cfg["thresholds"]["dynamic"]
-    s1 = indicators.get("S1")
-    if s1 is not None and s1.triggered:
-        return True, "змінено код, що виконується під час встановлення (S1 = 1)"
-    if pa >= theta_d:
-        return True, f"попередня ймовірність аномалії {pa:.2f} ≥ θd = {theta_d}"
-    return False, f"Pa = {pa:.2f} < θd = {theta_d} і код встановлення не змінювався"
+def regular_triggered(indicators: Iterable[Indicator]) -> List[Indicator]:
+    return [i for i in indicators if not i.critical and i.triggered]
 
 
-def danger_level(pa: float, critical: bool, cfg: Dict) -> str:
-    th = cfg["thresholds"]
+def need_dynamic(indicators: Dict[str, Indicator], cfg: Dict) -> Tuple[bool, str]:
+    """Умова запуску динамічного аналізу: спрацювало не менше m звичайних індикаторів."""
+    m = int(cfg["rules"]["dast_min_indicators"])
+    trig = regular_triggered(indicators.values())
+    codes = ", ".join(i.code for i in trig) or "жодного"
+    if len(trig) >= m:
+        return True, f"спрацювало {len(trig)} індикатори(ів) ({codes}) ≥ m = {m}"
+    return False, f"спрацювало {len(trig)} індикатор(ів) ({codes}) < m = {m}"
+
+
+def danger_level(critical: bool, n: int, cfg: Dict) -> str:
     if critical:
         return "критичний"
-    if pa >= th["block"]:
+    if n >= int(cfg["rules"]["high_level_indicators"]):
         return "високий"
-    if pa >= th["warn"]:
+    if n >= 1:
         return "середній"
     return "низький"
 
 
-def decide(pa: float, critical: bool, has_newcomer: bool, cfg: Dict) -> Tuple[str, int]:
-    th = cfg["thresholds"]
-    if critical or pa >= th["block"]:
+def decide(critical: bool, n: int, has_newcomer: bool) -> Tuple[str, int]:
+    if critical:
         return "block", EXIT_BLOCK
-    if pa >= th["warn"] or has_newcomer:
+    if n >= 1 or has_newcomer:
         return "warn", EXIT_WARN
     return "allow", EXIT_ALLOW

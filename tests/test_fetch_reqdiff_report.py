@@ -60,11 +60,11 @@ def test_requirements_diff():
 
 
 RESULT = {"package": "demo", "old_version": "1.0", "new_version": "1.1", "decision": "block", "exit_code": 2,
-          "anomaly_probability": 1.0, "update_trust": 0.0, "author_trust": None, "danger_level": "критичний",
+          "triggered_count": 0, "author_trust": None, "danger_level": "критичний",
           "dynamic_analysis": True, "warnings": [], "notes": [], "authors": [], "vulnerabilities": [],
           "timings_seconds": {"total": 1.0},
           "indicators": [{"code": "K5", "name": "Читання файлів-приманок", "value": 1.0, "weight": 0,
-                          "critical": True, "contribution": 1.0, "evaluated": True, "note": None,
+                          "critical": True, "triggered": True, "evaluated": True, "note": None,
                           "evidence": [{"message": "Прочитано ~/.ssh/id_rsa"}]}]}
 
 

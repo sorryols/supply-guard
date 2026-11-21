@@ -1,59 +1,65 @@
-"""Блокові тести модуля scoring (формула 2.4 і правило прийняття рішення)."""
+"""Блокові тести модуля scoring (правило прийняття рішення без ваг)."""
 
-import pytest
-
+from libsentinel.config import load_config
 from libsentinel.models import Indicator
-from libsentinel.scoring import anomaly_probability, decide, danger_level, need_dynamic
+from libsentinel.scoring import (critical_triggered, danger_level, decide, need_dynamic,
+                                 regular_triggered)
+
+CFG = load_config(None)
 
 
-def ind(code, value, weight=0.0, evaluated=True):
-    return Indicator(code=code, value=value, weight=weight, evaluated=evaluated)
+def ind(code, value=1.0, evaluated=True):
+    return Indicator(code=code, value=value, evaluated=evaluated)
 
 
-def test_noisy_or_single():
-    assert anomaly_probability([ind("S1", 1, 0.4)]) == pytest.approx(0.4)
+def test_triggered_is_binary():
+    assert ind("S2", 1).triggered
+    assert ind("S5", 0.3).triggered          # будь-яке ненульове значення означає «спрацював»
+    assert not ind("S2", 0).triggered
 
 
-def test_noisy_or_two_indicators():
-    # 1 − (1 − 0.4)(1 − 0.3) = 0.58
-    assert anomaly_probability([ind("S1", 1, 0.4), ind("A4", 1, 0.3)]) == pytest.approx(0.58)
+def test_not_evaluated_is_not_triggered():
+    assert not ind("B1", 1, evaluated=False).triggered
+    assert regular_triggered([ind("B1", 1, evaluated=False)]) == []
 
 
-def test_noisy_or_bounded_by_one():
-    many = [ind(f"S{i}", 1, 0.5) for i in range(1, 7)]
-    pa = anomaly_probability(many)
-    assert 0.98 < pa < 1.0
+def test_critical_separated_from_regular():
+    inds = [ind("K1"), ind("S2"), ind("A4", 0)]
+    assert [i.code for i in critical_triggered(inds)] == ["K1"]
+    assert [i.code for i in regular_triggered(inds)] == ["S2"]
 
 
-def test_continuous_indicator():
-    # A3 = 1 − τ = 0.5, p = 0.4 → 0.2
-    assert anomaly_probability([ind("A3", 0.5, 0.4)]) == pytest.approx(0.2)
+def test_decide_critical_blocks():
+    assert decide(True, 0, False) == ("block", 2)
 
 
-def test_not_evaluated_and_critical_ignored_in_pa():
-    assert anomaly_probability([ind("B1", 1, 0.7, evaluated=False), ind("K1", 1)]) == 0.0
+def test_decide_any_indicator_goes_to_review():
+    assert decide(False, 1, False) == ("warn", 1)
+    assert decide(False, 5, False) == ("warn", 1)
 
 
-@pytest.mark.parametrize("pa,crit,newcomer,expected", [
-    (0.10, False, False, ("allow", 0)),
-    (0.30, False, False, ("warn", 1)),
-    (0.69, False, False, ("warn", 1)),
-    (0.70, False, False, ("block", 2)),
-    (0.05, True, False, ("block", 2)),
-    (0.05, False, True, ("warn", 1)),
-])
-def test_decision_rule(cfg, pa, crit, newcomer, expected):
-    assert decide(pa, crit, newcomer, cfg) == expected
+def test_decide_newcomer_goes_to_review():
+    assert decide(False, 0, True) == ("warn", 1)
 
 
-def test_danger_level(cfg):
-    assert danger_level(0.1, False, cfg) == "низький"
-    assert danger_level(0.5, False, cfg) == "середній"
-    assert danger_level(0.8, False, cfg) == "високий"
-    assert danger_level(0.0, True, cfg) == "критичний"
+def test_decide_clean_allows():
+    assert decide(False, 0, False) == ("allow", 0)
 
 
-def test_need_dynamic(cfg):
-    assert need_dynamic({"S1": ind("S1", 1, 0.4)}, 0.0, cfg)[0] is True
-    assert need_dynamic({}, 0.35, cfg)[0] is True
-    assert need_dynamic({}, 0.10, cfg)[0] is False
+def test_dast_needs_two_indicators():
+    one = {"S1": ind("S1")}
+    two = {"S1": ind("S1"), "S2": ind("S2")}
+    assert need_dynamic(one, CFG)[0] is False
+    assert need_dynamic(two, CFG)[0] is True
+
+
+def test_dast_ignores_critical_and_not_evaluated():
+    inds = {"K1": ind("K1"), "S2": ind("S2"), "B1": ind("B1", evaluated=False)}
+    assert need_dynamic(inds, CFG)[0] is False
+
+
+def test_danger_levels():
+    assert danger_level(True, 0, CFG) == "критичний"
+    assert danger_level(False, 3, CFG) == "високий"
+    assert danger_level(False, 1, CFG) == "середній"
+    assert danger_level(False, 0, CFG) == "низький"

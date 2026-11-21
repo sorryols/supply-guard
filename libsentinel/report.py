@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional
 from . import __version__
 from .models import INDICATOR_NAMES
 
-DECISION_UA = {"allow": "ДОПУСТИТИ", "warn": "ДОПУСТИТИ З ПОПЕРЕДЖЕННЯМ", "block": "ЗАБЛОКУВАТИ",
+DECISION_UA = {"allow": "ДОПУСТИТИ", "warn": "НА РОЗГЛЯД РОЗРОБНИКА", "block": "ЗАБЛОКУВАТИ",
                "error": "ПОМИЛКА АНАЛІЗУ"}
 
 
@@ -51,9 +51,10 @@ def render_console(r: Dict[str, Any], color: bool = True, verbose: bool = False)
 
     col = {"allow": c.G, "warn": c.Y, "block": c.R}.get(r["decision"], "")
     out.append(f" Рішення:                 {col}{c.B}{DECISION_UA[r['decision']]}{c.X} (код завершення {r['exit_code']})")
-    out.append(f" Ймовірність аномалії Pa: {_fmt(r['anomaly_probability'])}")
-    out.append(f" Довіра до оновлення D:   {_fmt(r['update_trust'])}")
-    out.append(f" Довіра до авторів τ:     {_fmt(r['author_trust'])}")
+    trig_crit = [i for i in r["indicators"] if i["critical"] and i["evaluated"] and i["value"] > 0]
+    out.append(f" Критичних індикаторів:   {len(trig_crit)}")
+    out.append(f" Інших індикаторів:       {r.get('triggered_count', 0)}")
+    out.append(f" Довіра до авторів Da:    {_fmt(r['author_trust'])}")
     out.append(f" Рівень небезпеки:        {col}{r['danger_level']}{c.X}")
     out.append(f" Динамічний аналіз:       {'виконано' if r['dynamic_analysis'] else 'не виконувався'}")
     diff = (r.get("meta") or {}).get("diff")
@@ -67,8 +68,9 @@ def render_console(r: Dict[str, Any], color: bool = True, verbose: bool = False)
         out.append(f"   {c.G}немає{c.X}")
     for i in trig:
         mark = f"{c.R}[КРИТИЧНИЙ]{c.X} " if i["critical"] else ""
-        contrib = "блокування" if i["critical"] else f"внесок {i['contribution']:.2f} (x={i['value']:.2f}, p={i['weight']})"
-        out.append(f"  {c.B}{i['code']}{c.X} {mark}{i['name']} — {contrib}")
+        tail = " — блокування" if i["critical"] else ""
+        extra = f" ({i['note']})" if i.get("note") and not i["critical"] else ""
+        out.append(f"  {c.B}{i['code']}{c.X} {mark}{i['name']}{tail}{extra}")
         limit = None if verbose else 3
         for e in i["evidence"][:limit]:
             loc = ""
@@ -96,7 +98,7 @@ def render_console(r: Dict[str, Any], color: bool = True, verbose: bool = False)
     vulns = r.get("vulnerabilities") or []
     if vulns:
         out.append("")
-        out.append(f"{c.B} Відомі вразливості та записи про шкідливі пакети ({len(vulns)}){c.X}")
+        out.append(f"{c.B} Відомі вразливості та записи про шкідливі бібліотеки ({len(vulns)}){c.X}")
         for v in vulns[:15]:
             mark = f"{c.R}ШКІДЛИВИЙ{c.X} " if v["malicious"] else ""
             fixed = f", виправлено у {v['fixed']}" if v.get("fixed") else ""
@@ -124,13 +126,20 @@ def render_console(r: Dict[str, Any], color: bool = True, verbose: bool = False)
 def render_summary(results: List[Dict[str, Any]], color: bool = True) -> str:
     c = Colors(color)
     lines = ["", f"{c.B}Підсумок перевірки залежностей{c.X}",
-             f" {'Бібліотека':<28}{'Версії':<26}{'Pa':>6}  Рішення"]
+             f" {'Бібліотека':<28}{'Версії':<26}{'Ознак':>6}  Рішення"]
     for r in results:
         v = f"{r.get('old_version') or 'нова'} → {r['new_version']}"
         col = {"allow": c.G, "warn": c.Y, "block": c.R}.get(r["decision"], c.R)
-        lines.append(f" {r['package']:<28}{v:<26}{_fmt(r.get('anomaly_probability')):>6}  "
+        lines.append(f" {r['package']:<28}{v:<26}{_cnt(r):>6}  "
                      f"{col}{DECISION_UA.get(r['decision'], r['decision'])}{c.X}")
     return "\n".join(lines)
+
+
+def _cnt(r: Dict[str, Any]) -> str:
+    if r.get("decision") == "error":
+        return "—"
+    crit = sum(1 for i in r.get("indicators", []) if i["critical"] and i["evaluated"] and i["value"] > 0)
+    return f"{crit}К+{r.get('triggered_count') or 0}" if crit else str(r.get("triggered_count") or 0)
 
 
 def to_json(results: Any) -> str:
@@ -156,7 +165,7 @@ def to_sarif(results: List[Dict[str, Any]], requirements_file: Optional[str] = N
                 (f"{e['file']}:{e.get('line', '')} " if e.get("file") else "") + e["message"]
                 for e in i["evidence"][:3])
             msg = (f"{r['package']} {r.get('old_version') or ''} → {r['new_version']}: {i['name']}. {ev} "
-                   f"[Pa={_fmt(r['anomaly_probability'])}, рішення: {DECISION_UA[r['decision']]}]")
+                   f"[індикаторів: {r.get('triggered_count', 0)}, рішення: {DECISION_UA[r['decision']]}]")
             res: Dict[str, Any] = {"ruleId": i["code"], "level": level, "message": {"text": msg}}
             if requirements_file:
                 ln = (lines or {}).get(r["package"].lower(), 1)
