@@ -29,7 +29,7 @@ from .reqdiff import diff_requirements, git_show
 
 
 def _common(p: argparse.ArgumentParser) -> None:
-    p.add_argument("--config", help="Файл конфігурації YAML (ваги, пороги, рівні довіри)")
+    p.add_argument("--config", help="Файл конфігурації YAML (параметри правила рішення, рівні довіри)")
     p.add_argument("--json", metavar="FILE", help="Зберегти повний звіт у JSON")
     p.add_argument("--sarif", metavar="FILE", help="Зберегти звіт у SARIF (GitHub Code Scanning)")
     p.add_argument("--dast", choices=["auto", "always", "never"], default="auto",
@@ -188,7 +188,7 @@ def cmd_update_data(cfg) -> int:
                                capture_output=True, text=True)
     if p.returncode == 0:
         n = len(list((target / "osv" / "malicious" / "pypi").glob("*")))
-        print(f"База OpenSSF Malicious Packages (PyPI) оновлена: {n} пакетів у {target}")
+        print(f"База OpenSSF Malicious Packages (PyPI) оновлена: {n} бібліотек у {target}")
     else:
         print(f"Помилка git: {p.stderr.strip()}")
         rc = 1

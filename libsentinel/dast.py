@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from .models import Context
+from .models import Context, NO_WEIGHTS
 
 SANDBOX_DIR = Path(__file__).resolve().parent / "sandbox"
 
@@ -206,7 +206,7 @@ def run_container(archive: Path, cfg: Dict[str, Any]) -> Tuple[Dict[str, Any], s
 
 
 def apply_findings(ctx: Context, f: DastFindings, info: Dict[str, Any], cfg: Dict[str, Any]) -> None:
-    w = cfg["weights"]
+    w = NO_WEIGHTS  # у методі індикатори не мають ваг
     B1, B2, B3, K5 = ctx.ind("B1", w["B1"]), ctx.ind("B2", w["B2"]), ctx.ind("B3", w["B3"]), ctx.ind("K5")
     phase_ua = {"install": "встановлення", "import": "імпорт"}
     for host, port, ph in f.connections[:10]:
@@ -229,7 +229,7 @@ def apply_findings(ctx: Context, f: DastFindings, info: Dict[str, Any], cfg: Dic
 
 def run(ctx: Context, cfg: Dict[str, Any]) -> bool:
     """Повертає True, якщо динамічний аналіз виконано."""
-    w = cfg["weights"]
+    w = NO_WEIGHTS  # у методі індикатори не мають ваг
     for code in ("B1", "B2", "B3"):
         ctx.ind(code, w[code])
     ctx.ind("K5")

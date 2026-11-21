@@ -4,7 +4,7 @@ D1 — нова пряма залежність;
 D2 — схожість назви на популярну бібліотеку (відстань Левенштейна);
 D3 — нова або малоактивна залежність;
 D4 — відомі вразливості (OSV);
-К4 — бібліотека або залежність у базі шкідливих пакетів (OSV MAL-*, OpenSSF Malicious Packages).
+К4 — бібліотека або залежність у базі шкідливих бібліотек (OSV MAL-*, OpenSSF Malicious Packages).
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ from packaging.version import InvalidVersion, Version
 from .avt_meta import owners_from_project, release_times
 from .cache import default_cache_dir
 from .config import DATA_DIR
-from .models import Context, Vulnerability
+from .models import Context, Vulnerability, NO_WEIGHTS
 from .net import Http, NetError, OSV, PyPI
 
 
@@ -163,7 +163,7 @@ def ossf_local_malicious(name: str, version: Optional[str], ossf_dir: str) -> Li
 
 
 def run(ctx: Context, http: Http, cfg: Dict[str, Any], offline: bool = False) -> None:
-    w = cfg["weights"]
+    w = NO_WEIGHTS  # у методі індикатори не мають ваг
     dcfg = cfg["deps"]
     D1, D2, D3, D4 = (ctx.ind(c, w[c]) for c in ("D1", "D2", "D3", "D4"))
     K4 = ctx.ind("K4")
@@ -223,7 +223,7 @@ def run(ctx: Context, http: Http, cfg: Dict[str, Any], offline: bool = False) ->
             dep_versions[dep] = _latest_matching(proj, spec) if proj else None
     ctx.meta["dependency_versions"] = dep_versions
 
-    # Відомі вразливості та шкідливі пакети (OSV, OpenSSF Malicious Packages)
+    # Відомі вразливості та шкідливі бібліотеки (OSV, OpenSSF Malicious Packages)
     if offline:
         D4.evaluated = False
         D4.note = "Локальний режим: OSV не перевірявся"
@@ -242,16 +242,23 @@ def run(ctx: Context, http: Http, cfg: Dict[str, Any], offline: bool = False) ->
         if not osv_ok:
             D4.evaluated = False
             D4.note = "OSV недоступний"
+        use_db = dcfg.get("use_malicious_db", True)
         for v in ctx.vulnerabilities:
+            if v.malicious and not use_db:
+                continue
             if v.malicious:
                 K4.value = 1.0
-                K4.add(f"{v.package} {v.version or ''}: запис {v.id} у базі шкідливих пакетів OpenSSF/OSV")
+                K4.add(f"{v.package} {v.version or ''}: запис {v.id} у базі шкідливих бібліотек OpenSSF/OSV")
             else:
                 D4.value = 1.0
                 D4.add((f"{v.package} {v.version or ''}: {v.id} {v.severity} "
                         f"{('виправлено у ' + v.fixed) if v.fixed else ''}").strip())
     # Локальна копія OpenSSF Malicious Packages
     local_targets = [(ctx.name, ctx.new.version)] + [(d, dep_versions.get(d)) for d in sorted(new)]
+    if not dcfg.get("use_malicious_db", True):
+        K4.evaluated = False
+        K4.note = "Перевірку за базами шкідливих бібліотек вимкнено (експеримент без бази)"
+        local_targets = []
     for name, version in local_targets:
         ids = ossf_local_malicious(name, version, dcfg.get("ossf_dir", ""))
         if ids:

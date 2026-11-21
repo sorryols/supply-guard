@@ -26,9 +26,9 @@ def test_trust_formula_weighted_by_lines(cfg):
     c.authors = [Author("alice", "Alice", "maintainer", 1.0, 90),
                  Author("bob", "Bob", "newcomer", 0.2, 10)]
     tau = avt_meta.finalize_trust(c, cfg, 0.4)
-    # τ = (90·1 + 10·0.2) / 100 = 0.92
+    # Da = (90·1 + 10·0.2) / 100 = 0.92 ≥ δ = 0.5 → A3 не спрацьовує
     assert tau == pytest.approx(0.92)
-    assert c.indicators["A3"].value == pytest.approx(0.08)
+    assert not c.indicators["A3"].triggered
     assert any("bob" in w for w in c.warnings), "для нового учасника має бути попередження"
 
 
@@ -39,6 +39,17 @@ def test_unmatched_lines_get_zero_trust(cfg):
     c.unmatched_lines = 50
     tau = avt_meta.finalize_trust(c, cfg, 0.4)
     assert tau == pytest.approx(0.5)
+    assert not c.indicators["A3"].triggered   # Da = δ — ще не «низька»
+
+
+def test_low_trust_triggers_a3(cfg):
+    c = ctx()
+    c.repo["status"] = "ok"
+    c.authors = [Author("alice", "Alice", "maintainer", 1.0, 10)]
+    c.unmatched_lines = 90
+    tau = avt_meta.finalize_trust(c, cfg, 0.4)
+    assert tau == pytest.approx(0.1)
+    assert c.indicators["A3"].triggered
 
 
 def test_trust_not_evaluated_when_repo_unavailable(cfg):

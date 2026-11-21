@@ -13,7 +13,7 @@ inputs:
     description: "Базова гілка для порівняння (типово — ціль pull request)"
     default: ""
   fail-on:
-    description: "block — зупиняти лише при блокуванні; warn — також при попередженні"
+    description: "block — зупиняти лише при блокуванні; warn — також при передачі на розгляд розробнику"
     default: "block"
   dast:
     description: "auto | always | never"
@@ -27,7 +27,7 @@ inputs:
 
 outputs:
   exit-code:
-    description: "0 — допуск, 1 — попередження, 2 — блокування, 3 — помилка"
+    description: "0 — допуск, 1 — на розгляд розробника, 2 — блокування, 3 — помилка"
     value: ${{ steps.scan.outputs.exit-code }}
 
 runs:

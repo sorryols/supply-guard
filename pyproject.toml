@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "libsentinel"
-version = "1.0.1"
+version = "1.1.0"
 description = "Засіб аналізу безпеки оновлень бібліотек з відкритим кодом (PyPI)"
 readme = "README.md"
 requires-python = ">=3.9"

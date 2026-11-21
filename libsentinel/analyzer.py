@@ -14,7 +14,7 @@ from .config import config_hash
 from .fetch import Fetcher
 from .models import EXIT_BLOCK, Context, Report
 from .net import Http, NetError, PyPI
-from .scoring import anomaly_probability, critical_triggered, danger_level, decide, need_dynamic
+from .scoring import critical_triggered, danger_level, decide, need_dynamic, regular_triggered
 
 
 class Analyzer:
@@ -50,7 +50,7 @@ class Analyzer:
                 old, old_rel = fetcher.prepare(name, old_version, "old", old_archives)
                 new, new_rel = fetcher.prepare(name, new_version, "new", new_archives)
             except NetError as e:
-                # Пакет або версію могли видалити з PyPI як шкідливі — перевіряємо базу OpenSSF
+                # Бібліотеку або версію могли видалити з PyPI як шкідливу — перевіряємо базу OpenSSF
                 mal = deps.ossf_local_malicious(name, new_version, self.cfg["deps"].get("ossf_dir", ""))
                 if not mal:
                     raise
@@ -66,7 +66,7 @@ class Analyzer:
             # Етап 3. Аналіз різниці між версіями та статичний аналіз
             t = time.perf_counter()
             sast.run(ctx, self.cfg, avt_meta.repo_file_matcher(ctx))
-            tau = avt_meta.finalize_trust(ctx, self.cfg, self.cfg["weights"]["A3"])
+            da = avt_meta.finalize_trust(ctx, self.cfg, 0.0)
             timings["sast"] = time.perf_counter() - t
 
             # Етап 4. Аналіз залежностей
@@ -74,11 +74,10 @@ class Analyzer:
             deps.run(ctx, self.http, self.cfg, offline=offline)
             timings["deps"] = time.perf_counter() - t
 
-            # Перевірка критичних індикаторів і попередня оцінка
+            # Перевірка критичних індикаторів
             inds = list(ctx.indicators.values())
             critical = critical_triggered(inds)
-            pa = anomaly_probability(inds)
-            ctx.meta["pa_preliminary"] = round(pa, 4)
+            ctx.meta["triggered_before_dast"] = [i.code for i in regular_triggered(inds)]
 
             # Етап 5. Динамічний аналіз (за умовою)
             dynamic_run = False
@@ -87,7 +86,7 @@ class Analyzer:
             elif dast_mode == "never" or not self.cfg["dast"]["enabled"]:
                 ctx.notes.append("Динамічний аналіз вимкнено")
             else:
-                need, reason = need_dynamic(ctx.indicators, pa, self.cfg)
+                need, reason = need_dynamic(ctx.indicators, self.cfg)
                 if dast_mode == "always" or need:
                     ctx.notes.append(f"Динамічний аналіз запущено: {reason if need else 'режим --dast always'}")
                     t = time.perf_counter()
@@ -107,21 +106,23 @@ class Analyzer:
                     ctx.notes.append("S1 знято: динамічний аналіз коду встановлення не виявив шкідливої поведінки")
             inds = list(ctx.indicators.values())
             critical = critical_triggered(inds)
-            pa = 1.0 if critical else anomaly_probability(inds)
+            n = len(regular_triggered(inds))
             has_newcomer = any(a.role == "newcomer" for a in ctx.authors)
-            decision, code = decide(pa, bool(critical), has_newcomer, self.cfg)
+            decision, code = decide(bool(critical), n, has_newcomer)
+            if decision == "warn":
+                ctx.notes.append("Рішення щодо оновлення приймає розробник на підставі доказів у звіті")
             timings["total"] = time.perf_counter() - t0
 
-            ordered = sorted(inds, key=lambda i: (not (i.critical and i.triggered), -i.contribution, i.code))
+            ordered = sorted(inds, key=lambda i: (not (i.critical and i.triggered), not i.triggered, i.code))
             report = Report(
                 package=name, old_version=old_version, new_version=new_version,
-                decision=decision, exit_code=code, probability=pa, trust_update=1 - pa,
-                author_trust=tau, level=danger_level(pa, bool(critical), self.cfg), indicators=ordered,
+                decision=decision, exit_code=code, triggered_count=n,
+                author_trust=da, level=danger_level(bool(critical), n, self.cfg), indicators=ordered,
                 vulnerabilities=ctx.vulnerabilities, authors=ctx.authors, warnings=ctx.warnings,
                 notes=ctx.notes, dynamic_run=dynamic_run, timings=timings,
             )
             result = report.to_dict()
-            result["meta"] = {k: v for k, v in ctx.meta.items() if k in ("diff", "dependencies", "pa_preliminary", "dast", "publishers", "owners")}
+            result["meta"] = {k: v for k, v in ctx.meta.items() if k in ("diff", "dependencies", "triggered_before_dast", "dast", "publishers", "owners")}
             result["repository"] = {k: v for k, v in ctx.repo.items() if k != "files"}
             if not local:
                 self.cache.put_result(key, result)
@@ -136,11 +137,11 @@ class Analyzer:
         k4.value = 1.0
         k4.add(f"{name} {new}: {', '.join(ids[:3])} у базі OpenSSF Malicious Packages")
         report = Report(package=name, old_version=old, new_version=new, decision="block", exit_code=EXIT_BLOCK,
-                        probability=1.0, trust_update=0.0, author_trust=None, level="критичний", indicators=[k4],
+                        triggered_count=0, author_trust=None, level="критичний", indicators=[k4],
                         vulnerabilities=[Vulnerability(id=i, package=name, version=new, malicious=True,
-                                                       summary="Шкідливий пакет (OpenSSF)") for i in ids[:5]],
-                        authors=[], warnings=[], notes=[f"Пакет недоступний у PyPI ({reason}) — "
-                                                       f"ймовірно, видалений як шкідливий"],
+                                                       summary="Шкідлива бібліотека (OpenSSF)") for i in ids[:5]],
+                        authors=[], warnings=[], notes=[f"Бібліотека недоступна в PyPI ({reason}) — "
+                                                       f"ймовірно, видалена як шкідлива"],
                         dynamic_run=False, timings={"total": elapsed})
         return report.to_dict()
 
@@ -149,5 +150,5 @@ def error_result(name: str, old: Optional[str], new: str, message: str) -> Dict[
     from .models import EXIT_ERROR
     return {"package": name, "old_version": old, "new_version": new, "decision": "error",
             "exit_code": EXIT_ERROR, "error": message, "indicators": [], "vulnerabilities": [],
-            "authors": [], "warnings": [], "notes": [message], "anomaly_probability": None,
+            "authors": [], "warnings": [], "notes": [message], "triggered_count": None,
             "danger_level": "невідомий", "dynamic_analysis": False, "timings_seconds": {}}
